@@ -2,7 +2,7 @@
 namespace MonkeyQ;
 /**
  * author 逆雪寒
- * version 0.9.1
+ * version 0.7.1
  */
 class MonkeyQ {
 
