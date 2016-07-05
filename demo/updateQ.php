@@ -37,21 +37,3 @@ var_dump($result);
 //   string(0) ""
 // }
 
-// $xxoo->deleteQueue();
-// $xxoo->setWaitSeconds(30);
-
-// while(true){
-// 	$message = $xxoo->pop();
-// 	var_dump($message);
-// 	if($message){
-// 		$xxoo->ID($message['Id'])->deleteMessage();
-// 	}
-// }
-
-
-
-// for($i=1;$i<100;$i++){
-// 	var_dump($xxoo->ID('sdwe_'.$i)
-// 	   ->body("asdfsdfqwerqwdfasdfasd")
-// 	   ->push());	
-// }
