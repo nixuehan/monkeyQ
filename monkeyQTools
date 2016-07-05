@@ -1,0 +1,137 @@
+#!/usr/bin/php
+<?php
+require 'sdk/monkeyQ.php';
+
+$monkey = \MonkeyQ\MonkeyQ::factory('182.92.242.149',9394);
+
+$longopts  = array(
+    "do:",
+    "qName:",
+    "message:",
+    "visibilityTimeout:",
+    "delaySeconds:",
+    "waitSeconds:"
+);
+
+$o = getopt("",$longopts);
+
+if(empty($o)){
+	goto MonkeyQ;
+}
+
+//创建队列
+if($o['do'] == "createQ"){
+
+	if($o['delaySeconds'] == ''){
+		$o['delaySeconds'] = 0;
+	}
+
+	if($o['visibilityTimeout'] == ''){
+		$o['visibilityTimeout'] = 10;
+	}
+
+	if($o['qName'] == ''){
+		Usage($o['do']);
+	}	
+
+	//创建普通消息队列
+	$q = $monkey->setQueueName($o['qName']);
+	$result = $q->setVisibilityTimeout($o['visibilityTimeout']) //设置
+				   ->setDelaySeconds($o['delaySeconds'])
+				   ->create();
+
+//修改队列
+}else if($o['do'] == "updateQ"){
+
+	if($o['delaySeconds'] == ''){
+		$o['delaySeconds'] = 0;
+	}
+
+	if($o['visibilityTimeout'] == ''){
+		$o['visibilityTimeout'] = 10;
+	}
+
+	if($o['qName'] == ''){
+		Usage($o['do']);
+	}	
+
+	$q = $monkey->setQueueName($o['qName']);
+	$result = $q->setVisibilityTimeout($o['visibilityTimeout'])
+	   			   ->setDelaySeconds($o['delaySeconds'])
+				   ->update();
+
+//删除队列
+}else if($o['do'] == "deleteQ"){
+
+	if($o['qName'] == ''){
+		Usage($o['do']);
+	}
+
+	$q = $monkey->setQueueName($o['qName']);
+	$result = $q->deleteQueue();
+
+}else if($o['do'] == "push"){
+
+	if($o['qName'] == ''){
+		Usage($o['do']);
+	}
+
+	if($o['message'] == ''){
+		Qexit('message Null');
+	}
+
+	$result = $monkey->setQueueName($o['qName'])
+					 ->message($o['message'])
+	 		         ->push();
+
+}else if($o['do'] == "pop"){
+
+	if($o['qName'] == ''){
+		Usage($o['do']);
+	}
+
+	if($o['waitSeconds'] == ''){
+		Qexit('waitSeconds Null');
+	}
+
+	$q = $monkey->setQueueName($o['qName']);
+	$q->setWaitSeconds($o['waitSeconds']); //设置long polling 阻塞时间.默认：30秒
+
+	//轮训队列
+	while(true){
+		$message = $q->pop();
+		if($message->OK){
+			var_dump($message->value()); //获取信息
+			// var_dump($message->deleteMessage());//删除此信息
+			var_dump($message->setVisibilityTime(0));//重新放入队列，设置变active时间
+		}
+	}
+
+}else{ goto MonkeyQ; }
+
+function Qexit($msg){
+	exit($msg.PHP_EOL);
+}
+
+function Usage($do=''){
+	if($do == 'createQ'){
+		Qexit("qName | visibilityTimeout | delaySeconds");
+	}else if($do == 'updateQ'){
+		Qexit("qName | visibilityTimeout | delaySeconds");
+	}else if($do == 'push'){
+		Qexit("qName | message");
+	}else if($do == 'pop'){
+		Qexit("qName | waitSeconds");
+	}else if($do == 'deleteQ'){
+		Qexit("qName");	
+	}else{
+		Qexit("do | qName | visibilityTimeout | delaySeconds | waitSeconds");		
+	}
+}
+
+if(!$result){ Usage(); }
+
+var_dump($result);
+
+MonkeyQ:
+Usage();
