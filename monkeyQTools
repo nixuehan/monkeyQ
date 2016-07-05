@@ -2,7 +2,7 @@
 <?php
 require 'sdk/monkeyQ.php';
 
-$monkey = \MonkeyQ\MonkeyQ::factory('182.92.242.149',9394);
+$monkey = \MonkeyQ\MonkeyQ::factory('6.92.6.6',9394);
 
 $longopts  = array(
     "do:",
