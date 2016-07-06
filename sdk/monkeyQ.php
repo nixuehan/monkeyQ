@@ -18,7 +18,7 @@ class MonkeyQ {
 	}
 
 	protected function decode($data) {
-		return json_decode($data,true);
+		return @json_decode($data,true);
 	}
 
 	private function host($host,$port) {
@@ -195,6 +195,17 @@ class MonkeyQ {
 	}
 
 	/**
+	 * long polling 守护
+	 */
+	public function watch(callable $fn) {
+		while(true){
+			if(!$fn()){
+				sleep(1);
+			}
+		}
+	}
+
+	/**
 	 * 长轮训后获得到消息，可以进行：删除消息 
 	 */
 	public function deleteMessage() {
@@ -202,10 +213,12 @@ class MonkeyQ {
 			return false;
 		}
 
-		return $this->request('delMessage',[
+		$result = $this->request('delMessage',[
 			'queueName' => $this->queueName,
 			'body' => $this->body
 		],'POST');
+
+		return $this->decode($result);
 	}
 
 	/**
@@ -217,11 +230,13 @@ class MonkeyQ {
 			return false;
 		}
 
-		return $this->request('setVisibilityTime',[
+		$result =  $this->request('setVisibilityTime',[
 			'queueName' => $this->queueName,
 			'body' => $this->body,
 			'visibilityTime' => (int)$visibilityTime
 		],'POST');
+
+		return $this->decode($result);
 	}
 
 	/**
@@ -232,9 +247,11 @@ class MonkeyQ {
 			return false;
 		}
 
-		return $this->request('delQueue',[
+		$result = $this->request('delQueue',[
 			'queueName' => $this->queueName
 		],'POST');
+
+		return $this->decode($result);
 	}
 }
 
@@ -272,12 +289,16 @@ class Message{
 	}
 
 	public function in($message){
-		$this->message = $message;
-		if($this->message['success']){
-			$this->monkeyQ->message($this->message['body']);
-			$this->OK = true;
-		}else{
+		if(!$message){
 			$this->OK = false;
+		}else{
+			$this->message = $message;
+			if($this->message['success']){
+				$this->monkeyQ->message($this->message['body']);
+				$this->OK = true;
+			}else{
+				$this->OK = false;
+			}
 		}
 	}
 }

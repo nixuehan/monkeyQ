@@ -80,18 +80,19 @@ func init(){
 func newPool(server string) *redis.Pool {
     return &redis.Pool{
         MaxIdle: 8,
+        MaxActive:0,
         IdleTimeout: 240 * time.Second,
         Dial: func () (redis.Conn, error) {
             conn, err := redis.Dial("tcp", server)
             if err != nil {
-            	log.Fatalf("Fail:redis connection failed")
+            	log.Printf("Fail:redis connection failed")
                 return nil, err
             }
 
 			if Auth != "" {
                 if _, err := conn.Do("AUTH", Auth); err != nil {
                     conn.Close()
-            		log.Fatalf("Fail:redis auth failed")
+            		log.Printf("Fail:redis auth failed")
                     return nil, err
                 }
             }
