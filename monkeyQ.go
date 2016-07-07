@@ -29,11 +29,6 @@ var (
 )
 
 func must(e error) {
-	defer func() {
-		if err := recover();err != nil{
-			log.Fatalf("Fatal error:%v",err)
-		}
-	}()
     if e != nil {
         panic(e)
     }
@@ -415,6 +410,11 @@ func(this *Monkey) DelQueue(queueName string) (err error){
     return
 }
 
+func(this *Monkey) Write(res http.ResponseWriter,message interface{}) {
+	result,err := json.Marshal(message)
+	must(err)
+	res.Write(result)
+}
 
 //准备队列
 type ReadyQueue struct{
@@ -644,24 +644,22 @@ func CreateQueue(res http.ResponseWriter,req *http.Request) {
 	messageRetentionPeriod := req.PostFormValue("MessageRetentionPeriod")
 	delaySeconds := req.PostFormValue("DelaySeconds")
 
+    if queueName == ""{
+    	MonkeyQ.Write(res,CreateResult{false,queueName,visibilityTimeout,messageRetentionPeriod,delaySeconds,"QueueName must not be null"})
+    	return
+    }
+
 	var optionQueue OptionQueue
 	optionQueue.QueueName = queueName
 	optionQueue.VisibilityTimeout = visibilityTimeout
 	optionQueue.MessageRetentionPeriod = messageRetentionPeriod
 	optionQueue.DelaySeconds = delaySeconds
 
-	var(
-		err error
-		result []byte
-	)
-
-	if err = MonkeyQ.Create(optionQueue);err != nil{
-		result,err = json.Marshal(CreateResult{false,queueName,visibilityTimeout,messageRetentionPeriod,delaySeconds,err.Error()})
+	if err := MonkeyQ.Create(optionQueue);err != nil{
+    	MonkeyQ.Write(res,CreateResult{false,queueName,visibilityTimeout,messageRetentionPeriod,delaySeconds,err.Error()})
 	}else{
-		result,err = json.Marshal(CreateResult{true,queueName,visibilityTimeout,messageRetentionPeriod,delaySeconds,""})
+    	MonkeyQ.Write(res,CreateResult{true,queueName,visibilityTimeout,messageRetentionPeriod,delaySeconds,""})
 	}
-	must(err)
-	res.Write(result)
 }
 
 func UpdateQueue(res http.ResponseWriter,req *http.Request) {
@@ -671,24 +669,22 @@ func UpdateQueue(res http.ResponseWriter,req *http.Request) {
 	messageRetentionPeriod := req.PostFormValue("MessageRetentionPeriod")//信息最大保存时间
 	delaySeconds := req.PostFormValue("DelaySeconds") //延迟时间
 
+    if queueName == ""{
+    	MonkeyQ.Write(res,CreateResult{false,queueName,visibilityTimeout,messageRetentionPeriod,delaySeconds,"QueueName must not be null"})
+    	return
+    }
+
 	var optionQueue OptionQueue
 	optionQueue.QueueName = queueName
 	optionQueue.VisibilityTimeout = visibilityTimeout
 	optionQueue.MessageRetentionPeriod = messageRetentionPeriod
 	optionQueue.DelaySeconds = delaySeconds
 
-	var(
-		err error
-		result []byte
-	)
-
-	if err = MonkeyQ.Update(optionQueue);err != nil{
-		result,err = json.Marshal(UpdateResult{false,queueName,visibilityTimeout,messageRetentionPeriod,delaySeconds,err.Error()})
+	if err := MonkeyQ.Update(optionQueue);err != nil{
+    	MonkeyQ.Write(res,UpdateResult{false,queueName,visibilityTimeout,messageRetentionPeriod,delaySeconds,err.Error()})
 	}else{
-		result,err = json.Marshal(UpdateResult{true,queueName,visibilityTimeout,messageRetentionPeriod,delaySeconds,""})
+    	MonkeyQ.Write(res,UpdateResult{true,queueName,visibilityTimeout,messageRetentionPeriod,delaySeconds,""})
 	}
-	must(err)
-	res.Write(result)
 }
 
 
@@ -698,40 +694,38 @@ func Push(res http.ResponseWriter,req *http.Request) {
 	body := req.PostFormValue("body")
 	delaySeconds := req.PostFormValue("delaySeconds") //延迟时间
 
-	var(
-		err error
-		result []byte
-	)
-	if err = MonkeyQ.Push(queueName,body,delaySeconds);err != nil{
-		result,err = json.Marshal(PushResult{false,queueName,body,delaySeconds,err.Error()})
-	}else{
-		result,err = json.Marshal(PushResult{true,queueName,body,delaySeconds,""})
-	}
-	must(err)
-	res.Write(result)
+    if queueName == "" || body == ""{
+    	MonkeyQ.Write(res,PushResult{false,queueName,body,delaySeconds,"queueName and body must not be null"})
+    	return
+    }
 
+	if err := MonkeyQ.Push(queueName,body,delaySeconds);err != nil{
+    	MonkeyQ.Write(res,PushResult{false,queueName,body,delaySeconds,err.Error()})
+	}else{
+    	MonkeyQ.Write(res,PushResult{true,queueName,body,delaySeconds,""})
+	}
 }
 
 func Pop(res http.ResponseWriter,req *http.Request) {
     req.ParseForm()
+
     queueName := req.Form["queueName"]
     waitSeconds := req.Form["waitSeconds"]
+
+    if len(waitSeconds) == 0 || len(queueName) == 0{
+    	MonkeyQ.Write(res,PopResult{false,"","queueName or waitSeconds lose"})
+    	return
+    }
 
 	second := toInt(waitSeconds[0])
 
     body,err := MonkeyQ.Pop(queueName[0],int(second))
 
-	var(
-		result []byte
-	)
-
     if err != nil{
-		result,err = json.Marshal(PopResult{false,"",err.Error()})
+    	MonkeyQ.Write(res,PopResult{false,"",err.Error()})
     }else{
-		result,err = json.Marshal(PopResult{true,body,""})
+    	MonkeyQ.Write(res,PopResult{true,body,""})
     }
-	must(err)
-	res.Write(result)
 }
 
 func DelMessage(res http.ResponseWriter,req *http.Request){
@@ -739,18 +733,18 @@ func DelMessage(res http.ResponseWriter,req *http.Request){
 	queueName := req.PostFormValue("queueName")
 	body := req.PostFormValue("body")
 
-	var(
-		result []byte
-	)
+    if queueName == "" || body == ""{
+    	MonkeyQ.Write(res,DelResult{false,"","queueName and body must not be null"})
+    	return
+    }
 
 	err := MonkeyQ.Del(queueName,body)
     if err != nil{
-		result,err = json.Marshal(DelResult{false,"",err.Error()})
+    	MonkeyQ.Write(res,DelResult{false,"",err.Error()})
+
     }else{
-		result,err = json.Marshal(DelResult{true,body,""})
+    	MonkeyQ.Write(res,DelResult{true,body,""})
     }
-	must(err)
-	res.Write(result)
 }
 
 func SetVisibilityTime(res http.ResponseWriter,req *http.Request){
@@ -760,52 +754,82 @@ func SetVisibilityTime(res http.ResponseWriter,req *http.Request){
 	body := req.PostFormValue("body")
 	visibilityTime := req.PostFormValue("visibilityTime")
 
-	var(
-		result []byte
-	)
+    if queueName == "" || body == ""{
+    	MonkeyQ.Write(res,SetVisibilityTimeResult{false,queueName,visibilityTime,"queueName and body must not be null"})
+    	return
+    }
 
 	visibilitySecond := toInt(visibilityTime)
 	err := MonkeyQ.SetVisibilityTime(queueName,body,visibilitySecond)
     if err != nil{
-		result,err = json.Marshal(SetVisibilityTimeResult{false,queueName,visibilityTime,err.Error()})
+    	MonkeyQ.Write(res,SetVisibilityTimeResult{false,queueName,visibilityTime,err.Error()})
     }else{
-		result,err = json.Marshal(SetVisibilityTimeResult{true,queueName,visibilityTime,""})
+    	MonkeyQ.Write(res,SetVisibilityTimeResult{true,queueName,visibilityTime,""})
     }
-	must(err)
-	res.Write(result)
 }
 
 func DelQueue(res http.ResponseWriter,req *http.Request) {
 	req.ParseForm()
 	queueName := req.PostFormValue("queueName")
 
-	var(
-		result []byte
-	)
+    if queueName == ""{
+    	MonkeyQ.Write(res,DelQueueResult{false,queueName,"queueName and body must not be null"})
+    	return
+    }
 
 	err := MonkeyQ.DelQueue(queueName)
     if err != nil{
-		result,err = json.Marshal(DelQueueResult{false,queueName,err.Error()})
+    	MonkeyQ.Write(res,DelQueueResult{false,queueName,err.Error()})
     }else{
-		result,err = json.Marshal(DelQueueResult{true,queueName,""})
+    	MonkeyQ.Write(res,DelQueueResult{true,queueName,""})
     }
-	must(err)
-	res.Write(result)
+}
+
+
+type WaitForYou struct{ }
+func (this *WaitForYou) ServeHTTP(res http.ResponseWriter,req *http.Request) {
+	
+	defer func() {
+		if err := recover();err != nil{
+			log.Printf("error:%s",err)
+		}
+	}()
+
+	ac := req.URL.Path
+	if ac == "/createQueue" {
+		CreateQueue(res,req);return
+	}else if ac == "/updateQueue" {
+		UpdateQueue(res,req);return
+	}else if ac == "/push" {
+		Push(res,req);return
+	}else if ac == "/pop" {
+		Pop(res,req);return
+	}else if ac == "/setVisibilityTime" {
+		SetVisibilityTime(res,req);return
+	}else if ac == "/delMessage" {
+		DelMessage(res,req);return
+	}else if ac == "/delQueue" {
+		DelQueue(res,req);return
+	}
+
+	http.NotFound(res,req)
 }
 
 func main(){
 
     runtime.GOMAXPROCS(runtime.NumCPU())
 
-	http.HandleFunc("/createQueue",CreateQueue)
-	http.HandleFunc("/updateQueue",UpdateQueue)
-	http.HandleFunc("/push",Push)
-	http.HandleFunc("/pop",Pop)
-	http.HandleFunc("/setVisibilityTime",SetVisibilityTime)
-	http.HandleFunc("/delMessage",DelMessage)
-	http.HandleFunc("/delQueue",DelQueue)
+	s := &http.Server{
+		Addr:           Host + ":" + Port,
+		Handler:        &WaitForYou{},
+		ReadTimeout:    31 * time.Second,
+		WriteTimeout:   10 * time.Second,
+		MaxHeaderBytes: 1 << 20,
+	}
+
 	log.Printf("Success:HTTP has been started")
-	log.Fatal(http.ListenAndServe(Host + ":" + Port,nil))
+	log.Fatal(s.ListenAndServe())
+
 }
 
 
