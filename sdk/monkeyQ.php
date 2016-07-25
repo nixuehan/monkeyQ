@@ -197,11 +197,20 @@ class MonkeyQ {
 	/**
 	 * long polling 守护
 	 */
-	public function watch(callable $fn) {
+	public function watch(Array $fn) {
+
+		if(!is_callable($fn['success']) || !is_callable($fn['fail'])){
+			return false;
+		}
 		while(true){
-			if(!$fn()){
-				sleep(1);
-			}
+			$message = $this->pop();
+            if($message->OK){
+       			$success = $fn['success'];
+                $success($message);
+            }else{
+            	$fail = $fn['fail'];
+                $fail($message);
+            }
 		}
 	}
 
@@ -212,7 +221,6 @@ class MonkeyQ {
 		if($this->queueName == '' || $this->body == ''){
 			return false;
 		}
-
 		$result = $this->request('delMessage',[
 			'queueName' => $this->queueName,
 			'body' => $this->body

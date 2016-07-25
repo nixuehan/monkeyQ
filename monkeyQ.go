@@ -34,12 +34,20 @@ func must(e error) {
 	}
 }
 
-func toInt(parameters string) int64 {
+func theMoment() int64{
+	return time.Now().Unix()
+}
+
+func toInt64(parameters string) int64 {
 	if parameter, err := strconv.ParseInt(parameters, 10, 32); err != nil {
 		return 0
 	} else {
 		return parameter
 	}
+}
+
+func toString(parameters int64) string{
+	return strconv.FormatInt(parameters,10)
 }
 
 func init() {
@@ -49,7 +57,6 @@ func init() {
 	flag.StringVar(&Port, "port", "9394", "port. default:9394")
 	flag.StringVar(&Redis, "redis", "127.0.0.1:6379", "redis server. default:127.0.0.1:6379")
 	flag.StringVar(&Auth, "auth", "", "redis server auth password")
-	//sdwoslDq23
 
 	flag.Parse()
 	Pool = newPool(Redis)
@@ -58,7 +65,9 @@ func init() {
 	var err error
 	redisPool := []*redis.Pool{Pool}
 	Qlock, err = redsync.NewMutexWithPool("redsync", redisPool)
-	must(err)
+	if err != nil{
+		log.Fatalf("redsync error: %v", err)
+	}
 
 	MonkeyQ = NewMonkey()
 	ReadyQ = NewReadyQueue()
@@ -70,6 +79,7 @@ func init() {
 	}
 
 	DelayQ.Trigger()
+	MonkeyQ.FunWork() //暂去掉
 }
 
 func newPool(server string) *redis.Pool {
@@ -143,7 +153,7 @@ func (this *Queues) init() (err error) {
 		}
 	}()
 
-	items, _ := this.GetAllQueueInOpt()
+	items, _ := this.GetAllQueuesInfo()
 
 	if len(items) == 0 {
 		return
@@ -205,15 +215,24 @@ func (this *Queues) ExistsQueueInOpt(qname string) (ok bool, err error) {
 }
 
 //获取系统配置
-func (this *Queues) GetAllQueueInOpt() ([]string, error) {
+func (this *Queues) GetAllQueuesInfo() ([]string, error) {
 	rdg := Pool.Get()
 	defer rdg.Close()
 
 	queues, err := redis.Strings(rdg.Do("SMEMBERS", OptQueueNames))
+
 	for _, q := range queues {
-		this.QueueNameCache[q] = ""
+		this.QueueNameCache[q] = "" //cache
 	}
 	return queues, err
+}
+
+func (this *Queues) GetAllQueuesInfoByCache() (map[string]string, error) {
+
+	if len(this.QueueNameCache) == 0 {
+		return nil,fmt.Errorf("queues info cache not exists")
+	}
+	return this.QueueNameCache,nil
 }
 
 func (this *Queues) DelQueue(queueName string) (err error) {
@@ -261,9 +280,9 @@ func (this *Queues) build(opt OptionQueue) (err error) {
 
 	queueName := this.Table(opt.QueueName)
 
-	visibilityTimeout, messageRetentionPeriod, delaySeconds := toInt(opt.VisibilityTimeout), toInt(opt.MessageRetentionPeriod), toInt(opt.DelaySeconds)
+	visibilityTimeout, messageRetentionPeriod, delaySeconds := toInt64(opt.VisibilityTimeout), toInt64(opt.MessageRetentionPeriod), toInt64(opt.DelaySeconds)
 
-	if toInt(opt.VisibilityTimeout) == 0 {
+	if visibilityTimeout == 0 {
 		return fmt.Errorf("VisibilityTimeout must be greater than zero!")
 	}
 
@@ -301,6 +320,22 @@ type Monkey struct {
 
 func NewMonkey() *Monkey {
 	return &Monkey{}
+}
+
+//定时清理
+func (this *Monkey) FunWork() {
+	go func(){
+		ticker := time.NewTicker(1 * time.Second)
+		for {
+			select {
+				case <-ticker.C:
+						queues, _ := Queue.GetAllQueuesInfoByCache()
+						for qname,_ := range queues {
+							this.CleanQueue(qname)
+						}
+			}
+		}
+	}()
 }
 
 //创建队列
@@ -343,11 +378,11 @@ func (this *Monkey) Push(queueName string, body string, delaySeconds string) (er
 	var delaySecondsInt, queueDelaySeconds int64
 
 	if delaySeconds != "" {
-		delaySecondsInt = toInt(delaySeconds)
+		delaySecondsInt = toInt64(delaySeconds)
 	}
 
 	if optionQueue.DelaySeconds != "" {
-		queueDelaySeconds = toInt(optionQueue.DelaySeconds)
+		queueDelaySeconds = toInt64(optionQueue.DelaySeconds)
 	}
 
 	if delaySecondsInt != 0 {
@@ -378,7 +413,16 @@ func (this *Monkey) readyPush(queueName string, body string) (err error) {
 
 //弹出队列
 func (this *Monkey) Pop(queueName string, waitSeconds int) (string, error) {
-	return ReadyQ.Pop(queueName, waitSeconds)
+	body,err := ReadyQ.Pop(queueName, waitSeconds)
+	if err != nil{
+		return "",err
+	}
+	//出列后入延迟列
+	optionQueue, ok := Queue.Get(queueName)
+	if ok {
+		DelayQ.Add(queueName, body, toInt64(optionQueue.VisibilityTimeout));
+	}
+	return body,err
 }
 
 //删除
@@ -390,6 +434,27 @@ func (this *Monkey) Del(queueName string, body string) (err error) {
 //
 func (this *Monkey) SetVisibilityTime(queueName string, body string, visibilityTime int64) (err error) {
 	err = DelayQ.SetVisibilityTime(queueName, body, visibilityTime)
+	return
+}
+
+func (this *Monkey) CleanQueue(queueName string) (err error) {
+	rdg := Pool.Get()
+	defer rdg.Close()
+
+	optionQueue,ok := Queue.Get(queueName)
+	delayQueueName := DelayQ.Table(queueName)
+
+	if !ok {
+		return fmt.Errorf("Queue does not exist")
+	}
+
+	holdSecond := toInt64(optionQueue.MessageRetentionPeriod)
+
+	validBySecond := theMoment() - holdSecond
+
+	if holdSecond != 0{
+		_,err = rdg.Do("ZREMRANGEBYSCORE", delayQueueName, 0, validBySecond)
+	}
 	return
 }
 
@@ -484,7 +549,7 @@ func (this *DelayQueue) Add(queueName string, id string, delaySeconds int64) (er
 	redis := Pool.Get()
 	defer redis.Close()
 
-	delaySeconds = time.Now().Unix() + delaySeconds
+	delaySeconds = theMoment() + delaySeconds
 	_, err = redis.Do("ZADD", this.Table(queueName), delaySeconds, id)
 	return
 }
@@ -505,10 +570,10 @@ func (this *DelayQueue) SetVisibilityTime(queueName string, body string, visibil
 	optionQueue, _ := Queue.Get(queueName)
 
 	if visibilityTime == 0 {
-		visibilityTime = toInt(optionQueue.VisibilityTimeout)
+		visibilityTime = toInt64(optionQueue.VisibilityTimeout)
 	}
 
-	visibilityTime = time.Now().Unix() + visibilityTime
+	visibilityTime = theMoment() + visibilityTime
 	_, err = redis.Do("ZADD", this.Table(queueName), visibilityTime, body)
 
 	return
@@ -523,26 +588,26 @@ func (this *DelayQueue) DelQueue(queueName string) (err error) {
 }
 
 //移去 准备队列
-func (this *DelayQueue) ToReadyQueue(queueName string, closeQueue chan bool) {
+func (this *DelayQueue) ToReadyQueue(queueName string, exit chan bool) {
 	rdg := Pool.Get()
 	defer rdg.Close()
 
 	if ok, _ := Queue.ExistsQueueInOpt(queueName); !ok {
-		closeQueue <- true
+		close(exit)
 		log.Printf("%s queue exit", queueName)
 	}
 
-	nowBySecond := time.Now().Unix()
+	nowBySecond := theMoment()
 	delayQueueName := this.Table(queueName)
 
 	items, err := redis.Strings(rdg.Do("ZRANGEBYSCORE", delayQueueName, 0, nowBySecond))
 	must(err)
 
-	_, err = redis.Int(rdg.Do("ZREMRANGEBYSCORE", delayQueueName, 0, nowBySecond))
-	must(err)
-
-	ReadyQ.MultiPush(queueName, items)
-
+	if len(items) != 0 {
+		_, err = redis.Int(rdg.Do("ZREMRANGEBYSCORE", delayQueueName, 0, nowBySecond))
+		must(err)
+		ReadyQ.MultiPush(queueName, items)
+	}
 }
 
 //监控队列
@@ -556,15 +621,15 @@ func (this *DelayQueue) Monitor(queueName string) {
 		Qlock.Unlock()
 	}()
 
-	closeQueue := make(chan bool, 1)
+	exit := make(chan bool)
 
 	for {
 		select {
 		case <-ticker.C:
 			if err := Qlock.Lock(); err == nil {
-				this.ToReadyQueue(queueName, closeQueue)
+				this.ToReadyQueue(queueName, exit)
 			}
-		case <-closeQueue:
+		case <-exit:
 			return
 		}
 	}
@@ -575,8 +640,8 @@ func (this *DelayQueue) Trigger() {
 	rdg := Pool.Get()
 	defer rdg.Close()
 
-	items, _ := Queue.GetAllQueueInOpt()
-	for _, qname := range items {
+	items, _ := Queue.GetAllQueuesInfoByCache()
+	for qname,_ := range items {
 		go this.Monitor(qname)
 	}
 }
@@ -647,7 +712,7 @@ func CreateQueue(res http.ResponseWriter, req *http.Request) {
 	var optionQueue OptionQueue
 	optionQueue.QueueName = queueName
 	optionQueue.VisibilityTimeout = visibilityTimeout
-	optionQueue.MessageRetentionPeriod = messageRetentionPeriod
+	optionQueue.MessageRetentionPeriod = messageRetentionPeriod //最大存储时间
 	optionQueue.DelaySeconds = delaySeconds
 
 	if err := MonkeyQ.Create(optionQueue); err != nil {
@@ -665,7 +730,7 @@ func UpdateQueue(res http.ResponseWriter, req *http.Request) {
 	delaySeconds := req.PostFormValue("DelaySeconds")                     //延迟时间
 
 	if queueName == "" {
-		MonkeyQ.Write(res, CreateResult{false, queueName, visibilityTimeout, messageRetentionPeriod, delaySeconds, "QueueName must not be null"})
+		MonkeyQ.Write(res, UpdateResult{false, queueName, visibilityTimeout, messageRetentionPeriod, delaySeconds, "QueueName must not be null"})
 		return
 	}
 
@@ -711,7 +776,7 @@ func Pop(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	second := toInt(waitSeconds[0])
+	second := toInt64(waitSeconds[0])
 
 	body, err := MonkeyQ.Pop(queueName[0], int(second))
 
@@ -753,7 +818,7 @@ func SetVisibilityTime(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	visibilitySecond := toInt(visibilityTime)
+	visibilitySecond := toInt64(visibilityTime)
 	err := MonkeyQ.SetVisibilityTime(queueName, body, visibilitySecond)
 	if err != nil {
 		MonkeyQ.Write(res, SetVisibilityTimeResult{false, queueName, visibilityTime, err.Error()})
@@ -782,7 +847,6 @@ func DelQueue(res http.ResponseWriter, req *http.Request) {
 type WaitForYou struct{}
 
 func (this *WaitForYou) ServeHTTP(res http.ResponseWriter, req *http.Request) {
-
 	defer func() {
 		if err := recover(); err != nil {
 			log.Printf("error:%s", err)
@@ -810,6 +874,9 @@ func (this *WaitForYou) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 		return
 	} else if ac == "/delQueue" {
 		DelQueue(res, req)
+		return
+	} else if ac == "/ping" {
+		res.Write([]byte("pong"))
 		return
 	}
 
