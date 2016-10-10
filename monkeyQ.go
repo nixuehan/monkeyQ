@@ -781,7 +781,7 @@ func Pop(res http.ResponseWriter, req *http.Request) {
 	body, err := MonkeyQ.Pop(queueName[0], int(second))
 
 	if err != nil {
-		MonkeyQ.Write(res, PopResult{false, "", err.Error()})
+		MonkeyQ.Write(res, PopResult{false, "", "no news"})
 	} else {
 		MonkeyQ.Write(res, PopResult{true, body, ""})
 	}
@@ -890,8 +890,8 @@ func main() {
 	s := &http.Server{
 		Addr:           Host + ":" + Port,
 		Handler:        &WaitForYou{},
-		ReadTimeout:    31 * time.Second,
-		WriteTimeout:   10 * time.Second,
+		ReadTimeout:    30 * time.Second,
+		WriteTimeout:   30 * time.Second,
 		MaxHeaderBytes: 1 << 20,
 	}
 

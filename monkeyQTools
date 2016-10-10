@@ -36,10 +36,13 @@ if($o['do'] == "createQ"){
 
 	//创建普通消息队列
 	$q = $monkey->setQueueName($o['qName']);
+
 	$result = $q->setVisibilityTimeout($o['visibilityTimeout']) //设置
 				   ->setDelaySeconds($o['delaySeconds'])
 				   ->create();
 
+	var_dump($result);
+	exit;
 //修改队列
 }else if($o['do'] == "updateQ"){
 
